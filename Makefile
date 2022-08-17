@@ -33,8 +33,9 @@ else
 endif
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
-GOBUILD=CGO_ENABLED=0 installsuffix=cgo go build -trimpath
-GOTEST=go test -v $(RACE)
+GOCACHE=$(abspath .gocache)
+GOBUILD=GOCACHE=$(GOCACHE) CGO_ENABLED=0 installsuffix=cgo go build -trimpath
+GOTEST=GOCACHE=$(GOCACHE) go test -v $(RACE)
 GOFMT=gofmt
 GOFUMPT=gofumpt
 FMT_LOG=.fmt.log
@@ -43,7 +44,6 @@ IMPORT_LOG=.import.log
 GIT_SHA=$(shell git rev-parse HEAD)
 GIT_CLOSEST_TAG=$(shell git describe --abbrev=0 --tags)
 DATE=$(shell date -u -d @$(shell git show -s --format=%ct) +'%Y-%m-%dT%H:%M:%SZ')
-UIDATE=$(shell cd ./jaeger-ui; date -u -d @$(shell git show -s --format=%ct) +'%Y-%m-%dT%H:%M:%SZ')
 BUILD_INFO_IMPORT_PATH=$(JAEGER_IMPORT_PATH)/pkg/version
 BUILD_INFO=-ldflags "-X $(BUILD_INFO_IMPORT_PATH).commitSHA=$(GIT_SHA) -X $(BUILD_INFO_IMPORT_PATH).latestVersion=$(GIT_CLOSEST_TAG) -X $(BUILD_INFO_IMPORT_PATH).date=$(DATE)"
 
@@ -84,6 +84,7 @@ clean:
 	rm -rf cover.out .cover/ cover.html $(FMT_LOG) $(IMPORT_LOG) \
 		jaeger-ui/packages/jaeger-ui/build
 	find ./cmd/query/app/ui/actual -type f -name '*.gz' -delete
+	GOCACHE=$(GOCACHE) go clean -cache -testcache
 
 .PHONY: test
 test: go-gen
@@ -165,37 +166,37 @@ lint:
 .PHONY: build-examples
 build-examples:
 	$(GOBUILD) -o ./examples/hotrod/hotrod-$(GOOS)-$(GOARCH) ./examples/hotrod/main.go
-	sha256sum ./examples/hotrod/hotrod-$(GOOS)-$(GOARCH) > ./examples/hotrod/hotrod-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum examples/hotrod/hotrod-$(GOOS)-$(GOARCH) > ./examples/hotrod/hotrod-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-tracegen
 build-tracegen:
 	$(GOBUILD) -o ./cmd/tracegen/tracegen-$(GOOS)-$(GOARCH) ./cmd/tracegen/main.go
-	sha256sum ./cmd/tracegen/tracegen-$(GOOS)-$(GOARCH) > ./cmd/tracegen/tracegen-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/tracegen/tracegen-$(GOOS)-$(GOARCH) > ./cmd/tracegen/tracegen-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-anonymizer
 build-anonymizer:
 	$(GOBUILD) -o ./cmd/anonymizer/anonymizer-$(GOOS)-$(GOARCH) $(BUILD_INFO) ./cmd/anonymizer/main.go
-	sha256sum ./cmd/anonymizer/anonymizer-$(GOOS)-$(GOARCH) > ./cmd/anonymizer/anonymizer-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/anonymizer/anonymizer-$(GOOS)-$(GOARCH) > ./cmd/anonymizer/anonymizer-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-esmapping-generator
 build-esmapping-generator:
 	$(GOBUILD) -o ./plugin/storage/es/esmapping-generator-$(GOOS)-$(GOARCH) $(BUILD_INFO) ./cmd/esmapping-generator/main.go
-	sha256sum ./plugin/storage/es/esmapping-generator-$(GOOS)-$(GOARCH) > ./plugin/storage/es/esmapping-generator-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum plugin/storage/es/esmapping-generator-$(GOOS)-$(GOARCH) > ./plugin/storage/es/esmapping-generator-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-esmapping-generator-linux
 build-esmapping-generator-linux:
 	 GOOS=linux GOARCH=amd64 $(GOBUILD) -o ./plugin/storage/es/esmapping-generator $(BUILD_INFO) ./cmd/esmapping-generator/main.go
-	sha256sum ./plugin/storage/es/esmapping-generator > ./plugin/storage/es/esmapping-generator.sha256sum.txt
+	sha256sum plugin/storage/es/esmapping-generator > ./plugin/storage/es/esmapping-generator.sha256sum.txt
 
 .PHONY: build-es-index-cleaner
 build-es-index-cleaner:
 	$(GOBUILD) -o ./cmd/es-index-cleaner/es-index-cleaner-$(GOOS)-$(GOARCH) ./cmd/es-index-cleaner/main.go
-	sha256sum ./cmd/es-index-cleaner/es-index-cleaner-$(GOOS)-$(GOARCH) > ./cmd/es-index-cleaner/es-index-cleaner-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/es-index-cleaner/es-index-cleaner-$(GOOS)-$(GOARCH) > ./cmd/es-index-cleaner/es-index-cleaner-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-es-rollover
 build-es-rollover:
 	$(GOBUILD) -o ./cmd/es-rollover/es-rollover-$(GOOS)-$(GOARCH) ./cmd/es-rollover/main.go
-	sha256sum ./cmd/es-rollover/es-rollover-$(GOOS)-$(GOARCH) > ./cmd/es-rollover/es-rollover-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/es-rollover/es-rollover-$(GOOS)-$(GOARCH) > ./cmd/es-rollover/es-rollover-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: docker-hotrod
 docker-hotrod:
@@ -212,10 +213,7 @@ cmd/query/app/ui/actual/index.html.gz: jaeger-ui/packages/jaeger-ui/build/index.
 	# do not delete dot-files
 	rm -rf cmd/query/app/ui/actual/*
 	cp -r jaeger-ui/packages/jaeger-ui/build/* cmd/query/app/ui/actual/
-	@echo "Set UI file dates to UI repository commit timestamp: $(UIDATE)"
-	# gzip stores file timestamps and therefore breaks reproducibility by default, setting the timestamps fixes this.
-	find cmd/query/app/ui/actual -type f | grep -v .gitignore | xargs touch --date=$(UIDATE)
-	find cmd/query/app/ui/actual -type f | grep -v .gitignore | xargs gzip
+	find cmd/query/app/ui/actual -type f | grep -v .gitignore | xargs gzip --no-name
 	find cmd/query/app/ui/actual -type f | grep -v .gitignore | xargs sha256sum | tee ui.sha256sum.txt
 
 
@@ -225,6 +223,7 @@ jaeger-ui/packages/jaeger-ui/build/index.html:
 .PHONY: rebuild-ui
 rebuild-ui:
 	cd jaeger-ui && yarn install --frozen-lockfile && cd packages/jaeger-ui && yarn build
+	# Asset manifest must be in sorted order for binary reproducibility.
 	mv jaeger-ui/packages/jaeger-ui/build/asset-manifest.json .asset-manifest.json
 	cat .asset-manifest.json | python -c 'import json, sys; o = json.loads(sys.stdin.read()); print(json.dumps(o, indent=2, sort_keys=True))' > jaeger-ui/packages/jaeger-ui/build/asset-manifest.json
 
@@ -238,32 +237,32 @@ build-all-in-one-debug build-agent-debug build-query-debug build-collector-debug
 .PHONY: build-all-in-one build-all-in-one-debug
 build-all-in-one build-all-in-one-debug: build-ui
 	$(GOBUILD) $(DISABLE_OPTIMIZATIONS) -tags ui -o ./cmd/all-in-one/all-in-one$(SUFFIX)-$(GOOS)-$(GOARCH) $(BUILD_INFO) ./cmd/all-in-one/main.go
-	sha256sum ./cmd/all-in-one/all-in-one$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/all-in-one/all-in-one$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/all-in-one/all-in-one$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/all-in-one/all-in-one$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-agent build-agent-debug
 build-agent build-agent-debug:
 	$(GOBUILD) $(DISABLE_OPTIMIZATIONS) -o ./cmd/agent/agent$(SUFFIX)-$(GOOS)-$(GOARCH) $(BUILD_INFO) ./cmd/agent/main.go
-	sha256sum './cmd/agent/agent$(SUFFIX)-$(GOOS)-$(GOARCH)' > './cmd/agent/agent$(SUFFIX)-$(GOOS)-$(GOARCH)'.sha256sum.txt
+	sha256sum cmd/agent/agent$(SUFFIX)-$(GOOS)-$(GOARCH) > './cmd/agent/agent$(SUFFIX)-$(GOOS)-$(GOARCH)'.sha256sum.txt
 
 .PHONY: build-query build-query-debug
 build-query build-query-debug: build-ui
 	$(GOBUILD) $(DISABLE_OPTIMIZATIONS) -tags ui -o ./cmd/query/query$(SUFFIX)-$(GOOS)-$(GOARCH) $(BUILD_INFO) ./cmd/query/main.go
-	sha256sum ./cmd/query/query$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/query/query$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/query/query$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/query/query$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-collector build-collector-debug
 build-collector build-collector-debug:
 	$(GOBUILD) $(DISABLE_OPTIMIZATIONS) -o ./cmd/collector/collector$(SUFFIX)-$(GOOS)-$(GOARCH) $(BUILD_INFO) ./cmd/collector/main.go
-	sha256sum ./cmd/collector/collector$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/collector/collector$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/collector/collector$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/collector/collector$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-ingester build-ingester-debug
 build-ingester build-ingester-debug:
 	$(GOBUILD) $(DISABLE_OPTIMIZATIONS) -o ./cmd/ingester/ingester$(SUFFIX)-$(GOOS)-$(GOARCH) ./cmd/ingester/main.go
-	sha256sum ./cmd/ingester/ingester$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/ingester/ingester$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/ingester/ingester$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/ingester/ingester$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-remote-storage build-remote-storage-debug
 build-remote-storage build-remote-storage-debug:
 	$(GOBUILD) $(DISABLE_OPTIMIZATIONS) -o ./cmd/remote-storage/remote-storage$(SUFFIX)-$(GOOS)-$(GOARCH) $(BUILD_INFO) ./cmd/remote-storage/main.go
-	sha256sum ./cmd/remote-storage/remote-storage$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/remote-storage/remote-storage$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum cmd/remote-storage/remote-storage$(SUFFIX)-$(GOOS)-$(GOARCH) > ./cmd/remote-storage/remote-storage$(SUFFIX)-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-binaries-linux
 build-binaries-linux:
@@ -373,7 +372,7 @@ docker-images-only: docker-images-cassandra \
 .PHONY: build-crossdock-binary
 build-crossdock-binary:
 	$(GOBUILD) -o ./crossdock/crossdock-$(GOOS)-$(GOARCH) ./crossdock/main.go
-	sha256sum ./crossdock/crossdock-$(GOOS)-$(GOARCH) > ./crossdock/crossdock-$(GOOS)-$(GOARCH).sha256sum.txt
+	sha256sum crossdock/crossdock-$(GOOS)-$(GOARCH) > ./crossdock/crossdock-$(GOOS)-$(GOARCH).sha256sum.txt
 
 .PHONY: build-crossdock-linux
 build-crossdock-linux:
@@ -624,7 +623,7 @@ certs-dryrun:
 
 .PHONY: collect-sums
 collect-sums:
-	find . -name '*sha256sum.txt' -exec cat {} \; > sha256sum.combined.txt
+	find . -name '*sha256sum.txt' -exec cat {} \; | sort -k2 > sha256sum.combined.txt
 
 .PHONY: test-checksums
 test-checksums:
